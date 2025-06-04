@@ -38,7 +38,7 @@ function getLinesFromFile(filename) {
   }
 }
 const proxies = getLinesFromFile("proxy.txt");
-const privateKeys = getLinesFromFile("pvkeys.txt");
+const privateKeys = getLinesFromFile("data.txt");
 
 const ERC20ABI = [
   "function decimals() view returns (uint8)",
