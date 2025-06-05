@@ -12,3 +12,10 @@ export function getRandomInt(min, max) {
 export function sendAnalytics() {}
 export function logPerformance(metrics) {}
 export function cleanupTemp() {}
+
+// --- Add this function for your main code ---
+export function syncStatus(message) {
+  // You can customize this to do whatever you want.
+  // For now, just log to the console.
+  console.log(`SyncStatus: ${message}`);
+}
