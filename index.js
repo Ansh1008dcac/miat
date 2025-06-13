@@ -18,17 +18,24 @@ const AZUSD_ADDRESS = process.env.AZUSD_ADDRESS;
 const VANAUSD_ADDRESS = process.env.VANAUSD_ADDRESS;
 const AUSD_ADDRESS = process.env.AUSD_ADDRESS;
 const VUSD_ADDRESS = process.env.VUSD_ADDRESS;
+const OG_ADDRESS = process.env.OG_ADDRESS || "0xFBBDAb7684A4Da0CFAE67C5c13fA73402008953e";
+const OUSD_ADDRESS = process.env.OUSD_ADDRESS || "0xD23016Fd7154d9A6F2830Bfb4eA3F3106AAE0E88";
+const USD1_ADDRESS = process.env.USD1_ADDRESS || "0x16a8A3624465224198d216b33E825BcC3B80abf7";
 
 const ROUTER_ADDRESS_AUSD = "0x2cFDeE1d5f04dD235AEA47E1aD2fB66e3A61C13e";
 const ROUTER_ADDRESS_VUSD = "0x3dCACa90A714498624067948C092Dd0373f08265";
 const ROUTER_ADDRESS_AZUSD = "0xB0b53d8B4ef06F9Bbe5db624113C6A5D35bB7522";
 const ROUTER_ADDRESS_VANAUSD = "0xEfbAE3A68b17a61f21C7809Edfa8Aa3CA7B2546f";
+const ROUTER_ADDRESS_OUSD = "0x0b4301877A981e7808A8F4B6E277C376960C7641"; // from your context
+
 const STAKING_ADDRESS_AZUSD = "0xf45Fde3F484C44CC35Bdc2A7fCA3DDDe0C8f252E";
 const STAKING_ADDRESS_VANAUSD = "0x2608A88219BFB34519f635Dd9Ca2Ae971539ca60";
 const STAKING_ADDRESS_VUSD = "0x5bb9Fa02a3DCCDB4E9099b48e8Ba5841D2e59d51";
 const STAKING_ADDRESS_AUSD = "0x054de909723ECda2d119E31583D40a52a332f85c";
 const STAKING_ADDRESS_LULUSD = "0x5De3fBd40D4c3892914c3b67b5B529D776A1483A";
 const STAKING_ADDRESS_USDE = "0x3988053b7c748023a1aE19a8ED4c1Bf217932bDB";
+const STAKING_ADDRESS_OUSD = "0xF8F951DA83dAC732A2dCF207B644E493484047eB";
+const STAKING_ADDRESS_USD1 = "0x7799841734Ac448b8634F1c1d7522Bc8887A7bB9";
 
 function getLinesFromFile(filename) {
   try {
@@ -100,7 +107,16 @@ const TOKEN_CONFIG = {
     outputTokenAddress: VANAUSD_ADDRESS,
     inputTokenName: "VANA",
     minAmount: 0.2
+  },
+  OUSD: {
+    routerAddress: ROUTER_ADDRESS_OUSD,
+    selector: "0xa6d67510",
+    inputTokenAddress: OG_ADDRESS,
+    outputTokenAddress: OUSD_ADDRESS,
+    inputTokenName: "0G",
+    minAmount: 1
   }
+  // USD1 is not mintable in your original script (no mint config)
 };
 
 const STAKING_CONFIG = {
@@ -139,6 +155,18 @@ const STAKING_CONFIG = {
     tokenAddress: USDE_ADDRESS,
     tokenName: "USDe",
     minAmount: 0.0001
+  },
+  OUSD: {
+    stakingAddress: STAKING_ADDRESS_OUSD,
+    tokenAddress: OUSD_ADDRESS,
+    tokenName: "0USD",
+    minAmount: 0.0001
+  },
+  USD1: {
+    stakingAddress: STAKING_ADDRESS_USD1,
+    tokenAddress: USD1_ADDRESS,
+    tokenName: "USD1",
+    minAmount: 0.0001
   }
 };
 
@@ -149,6 +177,8 @@ const FAUCET_APIS = {
   Ai16Z: "https://app.x-network.io/maitrix-ai16z/faucet",
   Virtual: "https://app.x-network.io/maitrix-virtual/faucet",
   Vana: "https://app.x-network.io/maitrix-vana/faucet",
+  USD1: "https://app.x-network.io/maitrix-usd1/faucet",
+  OG: "https://app.x-network.io/maitrix-0g/faucet"
 };
 
 // ==== BLESSED UI SETUP ====
