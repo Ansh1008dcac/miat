@@ -1,9 +1,8 @@
 import "dotenv/config";
 import { ethers } from "ethers";
 import axios from "axios";
-import * as utils from "./utils.js";
-import blessed from "blessed";
 import fs from "fs";
+import readline from "readline";
 
 // ==== CONFIGURATION ====
 const RPC_URL = process.env.RPC_URL;
@@ -26,7 +25,7 @@ const ROUTER_ADDRESS_AUSD = "0x2cFDeE1d5f04dD235AEA47E1aD2fB66e3A61C13e";
 const ROUTER_ADDRESS_VUSD = "0x3dCACa90A714498624067948C092Dd0373f08265";
 const ROUTER_ADDRESS_AZUSD = "0xB0b53d8B4ef06F9Bbe5db624113C6A5D35bB7522";
 const ROUTER_ADDRESS_VANAUSD = "0xEfbAE3A68b17a61f21C7809Edfa8Aa3CA7B2546f";
-const ROUTER_ADDRESS_OUSD = "0x0b4301877A981e7808A8F4B6E277C376960C7641"; // from your context
+const ROUTER_ADDRESS_OUSD = "0x0b4301877A981e7808A8F4B6E277C376960C7641";
 
 const STAKING_ADDRESS_AZUSD = "0xf45Fde3F484C44CC35Bdc2A7fCA3DDDe0C8f252E";
 const STAKING_ADDRESS_VANAUSD = "0x2608A88219BFB34519f635Dd9Ca2Ae971539ca60";
@@ -37,6 +36,7 @@ const STAKING_ADDRESS_USDE = "0x3988053b7c748023a1aE19a8ED4c1Bf217932bDB";
 const STAKING_ADDRESS_OUSD = "0xF8F951DA83dAC732A2dCF207B644E493484047eB";
 const STAKING_ADDRESS_USD1 = "0x7799841734Ac448b8634F1c1d7522Bc8887A7bB9";
 
+// ==== FILE HELPERS ====
 function getLinesFromFile(filename) {
   try {
     return fs.readFileSync(filename, "utf-8").split("\n").map(x => x.trim()).filter(Boolean);
@@ -116,7 +116,6 @@ const TOKEN_CONFIG = {
     inputTokenName: "0G",
     minAmount: 1
   }
-  // USD1 is not mintable in your original script (no mint config)
 };
 
 const STAKING_CONFIG = {
@@ -181,271 +180,149 @@ const FAUCET_APIS = {
   OG: "https://app.x-network.io/maitrix-0g/faucet"
 };
 
-// ==== BLESSED UI SETUP ====
-const screen = blessed.screen({ smartCSR: true, title: 'ANSH CLI Maitrix Bot' });
+// ==== LOGGING & UTILS ====
+function log(...args) { console.log(...args); }
+function bright(text) { return `\x1b[1m${text}\x1b[0m`; }
+function yellow(text) { return `\x1b[33m${text}\x1b[0m`; }
+function green(text) { return `\x1b[32m${text}\x1b[0m`; }
+function cyan(text) { return `\x1b[36m${text}\x1b[0m`; }
+function red(text) { return `\x1b[31m${text}\x1b[0m`; }
+function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+function randomCooldown() { return 2000 + Math.floor(Math.random() * 8000); }
 
-// Splash/loading box
-const splash = blessed.box({
-  top: 'center',
-  left: 'center',
-  width: '60%',
-  height: 7,
-  align: 'center',
-  valign: 'middle',
-  border: { type: 'line' },
-  style: { border: { fg: 'yellow' } },
-  content: '{yellow-fg}🔔 Checking routing protocols, please wait...{/yellow-fg}',
-  tags: true,
-  hidden: false
-});
-
-// Menu box (left)
-const menu = blessed.list({
-  parent: screen,
-  label: ' Main Menu ',
-  width: '25%',
-  height: '90%',
-  top: 'center',
-  left: 0,
-  keys: true,
-  mouse: true,
-  border: { type: 'line' },
-  style: {
-    selected: { bg: 'green', fg: 'black' },
-    item: { fg: 'white', bg: 'black' },
-    border: { fg: '#00ff00' }
-  },
-  items: [
-    'Claim Faucets for all accounts',
-    'Mint all tokens for all accounts',
-    'Stake all tokens for all accounts',
-    'Run Full Bot Sequence',
-    'Sync Status (config)',
-    'Exit'
-  ],
-  hidden: true
-});
-
-// Output log box (main area)
-const outputBox = blessed.log({
-  parent: screen,
-  label: ' Output ',
-  width: '50%',
-  height: '90%',
-  top: 'center',
-  left: '25%',
-  border: { type: 'line' },
-  style: { border: { fg: '#00ff00' } },
-  scrollable: true,
-  alwaysScroll: true,
-  scrollbar: { bg: 'green', ch: ' ' },
-  hidden: true,
-  tags: true
-});
-
-// Wallet status box (right)
-const walletBox = blessed.box({
-  parent: screen,
-  label: ' Wallets ',
-  width: '25%',
-  height: '90%',
-  top: 'center',
-  left: '75%',
-  border: { type: 'line' },
-  style: { border: { fg: '#00ff00' } },
-  tags: true,
-  hidden: true,
-  content: ''
-});
-
-// Helper: update wallet status area
-function showWalletStatus(currentIdx = 0, address = '', total = null) {
-  if (!total) total = privateKeys.length;
-  let content = `{bold}Total Wallets:{/bold} ${total}\n`;
-  if (address) {
-    content += `{bold}Now:{/bold} #${currentIdx + 1} ${address}\n`;
-  } else {
-    content += `{bold}Now:{/bold} (none)\n`;
-  }
-  walletBox.setContent(content);
-  screen.render();
+function formatTimeLeft(ms) {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${h}h ${m}m ${s}s`;
 }
 
-// Logging helper for output box
-function logToUI(msg, type = "info") {
-  const color = type === "success" ? "green"
-    : type === "error" ? "red"
-    : type === "warn" ? "yellow"
-    : type === "system" ? "cyan"
-    : "white";
-  outputBox.log(`{${color}-fg}${msg}{/}`);
-  outputBox.setScrollPerc(100);
-  screen.render();
-}
-
-function clearOutput() {
-  outputBox.setContent('');
-  screen.render();
-}
-
-// ==== CORE BOT LOGIC ====
-
-function log(msg, type = "info") {
-  logToUI(msg, type);
-}
-
-// All bot functions, same as before but logging to outputBox and updating walletBox
+// ==== BOT ACTIONS ====
 async function claimFaucetsForAll() {
   if (!privateKeys.length) {
-    log("No private keys found in pvkeys.txt. Please add at least one private key.", "error");
+    log(red("No private keys found in data.txt. Please add at least one private key."));
     return;
   }
   for (let i = 0; i < privateKeys.length; ++i) {
     const privKey = privateKeys[i];
     const proxy = proxies[i % proxies.length] || undefined;
-    if (proxy) {
-      process.env.HTTPS_PROXY = proxy;
-      process.env.HTTP_PROXY = proxy;
-    } else {
-      delete process.env.HTTPS_PROXY;
-      delete process.env.HTTP_PROXY;
-    }
     let provider = new ethers.JsonRpcProvider(RPC_URL);
     let wallet;
     try {
       wallet = new ethers.Wallet(privKey, provider);
     } catch (e) {
-      log(`Invalid private key at line ${i + 1}: ${e.message}`, "error");
+      log(red(`Invalid private key at line ${i + 1}: ${e.message}`));
       continue;
     }
-    showWalletStatus(i, wallet.address, privateKeys.length);
-    log(`\n=== [${i + 1}/${privateKeys.length}] Account: ${wallet.address} (Proxy: ${proxy || "none"}) ===`, "system");
+    log(`\n${bright(`[${i + 1}/${privateKeys.length}]`)} ${cyan(wallet.address)} (Proxy: ${proxy || "none"})`);
     for (const token in FAUCET_APIS) {
-      log(`[${i + 1}] Claiming faucet for ${token}...`);
+      log(yellow(`→ Claiming faucet for ${token}...`));
       await claimFaucet(token, wallet);
+      await sleep(randomCooldown());
     }
-    log(`[${i + 1}] Faucet claim finished for wallet.`, "system");
+    log(green(`✔ Faucet claim finished for wallet.`));
+    await sleep(randomCooldown());
   }
-  showWalletStatus();
-  log("All accounts faucet claim finished.", "system");
+  log(green("All accounts faucet claim finished."));
 }
 
 async function mintAllForAll() {
   if (!privateKeys.length) {
-    log("No private keys found in pvkeys.txt. Please add at least one private key.", "error");
+    log(red("No private keys found in data.txt. Please add at least one private key."));
     return;
   }
   for (let i = 0; i < privateKeys.length; ++i) {
     const privKey = privateKeys[i];
     const proxy = proxies[i % proxies.length] || undefined;
-    if (proxy) {
-      process.env.HTTPS_PROXY = proxy;
-      process.env.HTTP_PROXY = proxy;
-    } else {
-      delete process.env.HTTPS_PROXY;
-      delete process.env.HTTP_PROXY;
-    }
     let provider = new ethers.JsonRpcProvider(RPC_URL);
     let wallet;
     try {
       wallet = new ethers.Wallet(privKey, provider);
     } catch (e) {
-      log(`Invalid private key at line ${i + 1}: ${e.message}`, "error");
+      log(red(`Invalid private key at line ${i + 1}: ${e.message}`));
       continue;
     }
-    showWalletStatus(i, wallet.address, privateKeys.length);
-    log(`\n=== [${i + 1}/${privateKeys.length}] Account: ${wallet.address} (Proxy: ${proxy || "none"}) ===`, "system");
+    log(`\n${bright(`[${i + 1}/${privateKeys.length}]`)} ${cyan(wallet.address)} (Proxy: ${proxy || "none"})`);
     for (const token in TOKEN_CONFIG) {
-      log(`[${i + 1}] Minting token ${token}...`);
+      log(yellow(`→ Minting token ${token}...`));
       await mintTokenMax(token, wallet, provider);
+      await sleep(randomCooldown());
     }
-    log(`[${i + 1}] Mint finished for wallet.`, "system");
+    log(green(`✔ Mint finished for wallet.`));
+    await sleep(randomCooldown());
   }
-  showWalletStatus();
-  log("All accounts mint finished.", "system");
+  log(green("All accounts mint finished."));
 }
 
 async function stakeAllForAll() {
   if (!privateKeys.length) {
-    log("No private keys found in pvkeys.txt. Please add at least one private key.", "error");
+    log(red("No private keys found in data.txt. Please add at least one private key."));
     return;
   }
   for (let i = 0; i < privateKeys.length; ++i) {
     const privKey = privateKeys[i];
     const proxy = proxies[i % proxies.length] || undefined;
-    if (proxy) {
-      process.env.HTTPS_PROXY = proxy;
-      process.env.HTTP_PROXY = proxy;
-    } else {
-      delete process.env.HTTPS_PROXY;
-      delete process.env.HTTP_PROXY;
-    }
     let provider = new ethers.JsonRpcProvider(RPC_URL);
     let wallet;
     try {
       wallet = new ethers.Wallet(privKey, provider);
     } catch (e) {
-      log(`Invalid private key at line ${i + 1}: ${e.message}`, "error");
+      log(red(`Invalid private key at line ${i + 1}: ${e.message}`));
       continue;
     }
-    showWalletStatus(i, wallet.address, privateKeys.length);
-    log(`\n=== [${i + 1}/${privateKeys.length}] Account: ${wallet.address} (Proxy: ${proxy || "none"}) ===`, "system");
+    log(`\n${bright(`[${i + 1}/${privateKeys.length}]`)} ${cyan(wallet.address)} (Proxy: ${proxy || "none"})`);
     for (const token in STAKING_CONFIG) {
-      log(`[${i + 1}] Staking token ${token}...`);
+      log(yellow(`→ Staking token ${token}...`));
       await stakeTokenMax(token, wallet, provider);
+      await sleep(randomCooldown());
     }
-    log(`[${i + 1}] Stake finished for wallet.`, "system");
+    log(green(`✔ Stake finished for wallet.`));
+    await sleep(randomCooldown());
   }
-  showWalletStatus();
-  log("All accounts stake finished.", "system");
+  log(green("All accounts stake finished."));
 }
 
 async function runFullBotForAllAccounts() {
   if (!privateKeys.length) {
-    log("No private keys found in pvkeys.txt. Please add at least one private key.", "error");
+    log(red("No private keys found in data.txt. Please add at least one private key."));
     return;
   }
   for (let i = 0; i < privateKeys.length; ++i) {
     const privKey = privateKeys[i];
     const proxy = proxies[i % proxies.length] || undefined;
-    if (proxy) {
-      process.env.HTTPS_PROXY = proxy;
-      process.env.HTTP_PROXY = proxy;
-    } else {
-      delete process.env.HTTPS_PROXY;
-      delete process.env.HTTP_PROXY;
-    }
     let provider = new ethers.JsonRpcProvider(RPC_URL);
     let wallet;
     try {
       wallet = new ethers.Wallet(privKey, provider);
     } catch (e) {
-      log(`Invalid private key at line ${i + 1}: ${e.message}`, "error");
+      log(red(`Invalid private key at line ${i + 1}: ${e.message}`));
       continue;
     }
-    showWalletStatus(i, wallet.address, privateKeys.length);
-    log(`\n=== [${i + 1}/${privateKeys.length}] Account: ${wallet.address} (Proxy: ${proxy || "none"}) ===`, "system");
+    log(`\n${bright(`[${i + 1}/${privateKeys.length}]`)} ${cyan(wallet.address)} (Proxy: ${proxy || "none"})`);
     for (const token in FAUCET_APIS) {
-      log(`[${i + 1}] Claiming faucet for ${token}...`);
+      log(yellow(`→ Claiming faucet for ${token}...`));
       await claimFaucet(token, wallet);
+      await sleep(randomCooldown());
     }
     for (const token in TOKEN_CONFIG) {
-      log(`[${i + 1}] Minting token ${token}...`);
+      log(yellow(`→ Minting token ${token}...`));
       await mintTokenMax(token, wallet, provider);
+      await sleep(randomCooldown());
     }
     for (const token in STAKING_CONFIG) {
-      log(`[${i + 1}] Staking token ${token}...`);
+      log(yellow(`→ Staking token ${token}...`));
       await stakeTokenMax(token, wallet, provider);
+      await sleep(randomCooldown());
     }
-    log(`[${i + 1}] Finished bot sequence for wallet.`, "system");
+    log(green(`[${i + 1}] Finished bot sequence for wallet.`));
+    await sleep(randomCooldown());
   }
-  showWalletStatus();
-  log("All accounts finished.", "system");
+  log(green("All accounts finished."));
 }
 
 async function claimFaucet(token, wallet) {
   const apiUrl = FAUCET_APIS[token];
-  if (!apiUrl) { log(`API for token ${token} not found.`, "error"); return; }
+  if (!apiUrl) { log(red(`API for token ${token} not found.`)); return; }
   const headers = {
     "Content-Type": "application/json",
     "User-Agent": "Mozilla/5.0",
@@ -456,14 +333,14 @@ async function claimFaucet(token, wallet) {
     const response = await axios.post(apiUrl, payload, { headers });
     const { code, message, data } = response.data;
     if (code === 200) {
-      log(`Faucet claim success for ${token}: ${data.amount} tokens. TxHash: ${data.txHash}`, "success");
+      log(green(`✔ Faucet claim success for ${token}: ${data.amount} tokens. TxHash: ${data.txHash}`));
     } else if (code === 202) {
-      log(`Faucet claim for ${token} failed: ${message}`, "warn");
+      log(yellow(`Faucet claim for ${token} failed: ${message}`));
     } else {
-      log(`Faucet claim for ${token} failed: ${message}`, "error");
+      log(red(`Faucet claim for ${token} failed: ${message}`));
     }
   } catch (error) {
-    log(`Error claiming faucet for ${token}: ${error.message}`, "error");
+    log(red(`Error claiming faucet for ${token}: ${error.message}`));
   }
 }
 
@@ -471,18 +348,17 @@ async function mintTokenMax(token, wallet, provider) {
   try {
     const config = TOKEN_CONFIG[token];
     const inputContract = new ethers.Contract(config.inputTokenAddress, ERC20ABI, provider);
-    const inputContractWithSigner = inputContract.connect(wallet);
     const decimals = await inputContract.decimals();
     let rawBalance = await inputContract.balanceOf(wallet.address);
     let buffer = ethers.parseUnits("0.003", decimals);
     if (token === "AUSD" && rawBalance > buffer) rawBalance = rawBalance - buffer;
     if (rawBalance <= 0) {
-      log(`No ${config.inputTokenName} available to mint for ${token}.`, "warn");
+      log(yellow(`No ${config.inputTokenName} available to mint for ${token}.`));
       return;
     }
     await mintToken(token, ethers.formatUnits(rawBalance, decimals), wallet, provider);
   } catch (e) {
-    log(`Error in mintTokenMax for ${token}: ${e.message}`, "error");
+    log(red(`Error in mintTokenMax for ${token}: ${e.message}`));
   }
 }
 
@@ -495,30 +371,29 @@ async function mintToken(token, amount, wallet, provider) {
       throw new Error(`Invalid contract address for Input=${inputTokenAddress}, Output=${outputTokenAddress}, Router=${routerAddress}`);
     }
     const inputContract = new ethers.Contract(inputTokenAddress, ERC20ABI, provider);
-    const inputContractWithSigner = inputContract.connect(wallet);
     const decimals = await inputContract.decimals();
     const amountWei = ethers.parseUnits(amount.toString(), decimals);
     const balance = await inputContract.balanceOf(wallet.address);
     if (balance < amountWei) throw new Error(`Not enough ${inputTokenName}: ${ethers.formatUnits(balance, decimals)} available, ${amount} required`);
     const allowance = await inputContract.allowance(wallet.address, routerAddress);
     if (allowance < amountWei) {
-      log(`Requesting approval for ${amount} ${inputTokenName}...`, "warn");
-      const approveTx = await inputContractWithSigner.approve(routerAddress, amountWei);
+      log(yellow(`Requesting approval for ${amount} ${inputTokenName}...`));
+      const approveTx = await inputContract.connect(wallet).approve(routerAddress, amountWei);
       await approveTx.wait();
-      log(`Approval successful!`, "success");
+      log(green(`Approval successful!`));
     }
-    log(`Minting ${token}...`);
+    log(yellow(`Minting ${token}...`));
     const txData = selector + ethers.zeroPadValue(ethers.toBeHex(amountWei), 32).slice(2);
     const tx = await wallet.sendTransaction({ to: routerAddress, data: txData, gasLimit: 250000 });
-    log(`Mint Tx sent. TxHash: ${tx.hash}`);
+    log(cyan(`Mint Tx sent. TxHash: ${tx.hash}`));
     const receipt = await tx.wait();
     if (receipt.status === 1) {
-      log(`Successfully minted ${token}: ${amount} ${inputTokenName}. TxHash: ${receipt.transactionHash || receipt.hash}`, "success");
+      log(green(`Successfully minted ${token}: ${amount} ${inputTokenName}. TxHash: ${receipt.transactionHash || receipt.hash}`));
     } else {
       throw new Error(`Mint transaction failed: TxHash: ${receipt.transactionHash || receipt.hash}`);
     }
   } catch (error) {
-    log(`Failed to mint ${token}: ${error.message}`, "error");
+    log(red(`Failed to mint ${token}: ${error.message}`));
   }
 }
 
@@ -526,18 +401,17 @@ async function stakeTokenMax(token, wallet, provider) {
   try {
     const config = STAKING_CONFIG[token];
     const tokenContract = new ethers.Contract(config.tokenAddress, ERC20ABI, provider);
-    const tokenContractWithSigner = tokenContract.connect(wallet);
     const decimals = await tokenContract.decimals();
     let rawBalance = await tokenContract.balanceOf(wallet.address);
     const buffer = ethers.parseUnits("0.00005", decimals);
     if (rawBalance > buffer) rawBalance = rawBalance - buffer;
     if (rawBalance <= 0) {
-      log(`No ${config.tokenName} available to stake for ${token}.`, "warn");
+      log(yellow(`No ${config.tokenName} available to stake for ${token}.`));
       return;
     }
     await stakeToken(token, ethers.formatUnits(rawBalance, decimals), wallet, provider);
   } catch (e) {
-    log(`Error in stakeTokenMax for ${token}: ${e.message}`, "error");
+    log(red(`Error in stakeTokenMax for ${token}: ${e.message}`));
   }
 }
 
@@ -550,80 +424,86 @@ async function stakeToken(token, amount, wallet, provider) {
       throw new Error(`Invalid contract address for Token=${tokenAddress}, Staking=${stakingAddress}`);
     }
     const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, provider);
-    const tokenContractWithSigner = tokenContract.connect(wallet);
-    const stakingContract = new ethers.Contract(stakingAddress, STAKING_ABI, provider);
-    const stakingContractWithSigner = stakingContract.connect(wallet);
     const decimals = await tokenContract.decimals();
     const amountWei = ethers.parseUnits(amount.toString(), decimals);
     const balance = await tokenContract.balanceOf(wallet.address);
     if (balance < amountWei) throw new Error(`Not enough ${tokenName}: ${ethers.formatUnits(balance, decimals)} available, ${amount} required`);
     const allowance = await tokenContract.allowance(wallet.address, stakingAddress);
     if (allowance < amountWei) {
-      log(`Requesting approval for ${amount} ${tokenName}...`, "warn");
-      const approveTx = await tokenContractWithSigner.approve(stakingAddress, amountWei, { gasLimit: 100000 });
+      log(yellow(`Requesting approval for ${amount} ${tokenName}...`));
+      const approveTx = await tokenContract.connect(wallet).approve(stakingAddress, amountWei, { gasLimit: 100000 });
       await approveTx.wait();
-      log(`Approval successful!`, "success");
+      log(green(`Approval successful!`));
     }
-    log(`Staking ${token}...`);
-    const tx = await stakingContractWithSigner.stake(amountWei, { gasLimit: 300000 });
-    log(`Stake Tx sent. TxHash: ${tx.hash}`);
+    log(yellow(`Staking ${token}...`));
+    const stakingContract = new ethers.Contract(stakingAddress, STAKING_ABI, provider);
+    const tx = await stakingContract.connect(wallet).stake(amountWei, { gasLimit: 300000 });
+    log(cyan(`Stake Tx sent. TxHash: ${tx.hash}`));
     const receipt = await tx.wait();
     if (receipt.status === 1) {
-      log(`Successfully staked ${amount} ${tokenName}. TxHash: ${receipt.transactionHash || receipt.hash}`, "success");
+      log(green(`Successfully staked ${amount} ${tokenName}. TxHash: ${receipt.transactionHash || receipt.hash}`));
     } else {
       throw new Error(`Stake transaction failed: TxHash: ${receipt.transactionHash || receipt.hash}`);
     }
   } catch (error) {
-    log(`Failed to stake ${token}: ${error.message}`, "error");
+    log(red(`Failed to stake ${token}: ${error.message}`));
   }
 }
 
-// ==== MENU HANDLING ====
-menu.on('select', async (item, idx) => {
-  clearOutput();
-  showWalletStatus();
-  logToUI(`Selected: ${item.content}`, "system");
-  switch (idx) {
-    case 0:
-      await claimFaucetsForAll();
-      break;
-    case 1:
-      await mintAllForAll();
-      break;
-    case 2:
-      await stakeAllForAll();
-      break;
-    case 3:
-      await runFullBotForAllAccounts();
-      break;
-    case 4:
-      logToUI("Syncing status/config...");
-      utils.syncStatus("Manual sync triggered from UI.");
-      logToUI("Status sync complete.", "success");
-      break;
-    default:
-      logToUI("Bye!", "system");
-      setTimeout(() => process.exit(0), 1000);
-      return;
+// ==== CLI MENU ====
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+function showMenu() {
+  log("\n=== Maitrix CLI Bot ===");
+  log("1. Claim Faucets for all accounts");
+  log("2. Mint all tokens for all accounts");
+  log("3. Stake all tokens for all accounts");
+  log("4. Run automatic 24h");
+  log("5. Exit");
+}
+
+async function prompt(question) {
+  return new Promise(resolve => rl.question(question, resolve));
+}
+
+async function runAutomatic24h() {
+  log(green("Starting bot in 24h automatic mode."));
+  while (true) {
+    const nextRun = Date.now() + 24 * 60 * 60 * 1000;
+    const now = new Date();
+    log(`\n${bright(`[AUTO MODE]`)} ${cyan(now.toLocaleString())} Running full bot sequence for all accounts...`);
+    await runFullBotForAllAccounts();
+    let msLeft = nextRun - Date.now();
+    while (msLeft > 0) {
+      process.stdout.write(`\r${yellow(`Next run in: ${formatTimeLeft(msLeft)} (press Ctrl+C to exit)`)}   `);
+      await sleep(1000);
+      msLeft = nextRun - Date.now();
+    }
+    process.stdout.write("\n");
   }
-  // After action, redisplay menu
-  setTimeout(() => { clearOutput(); showWalletStatus(); menu.focus(); }, 1200);
-});
+}
 
-// ==== INITIAL ROUTING PROTOCOL SPLASH ====
-screen.append(splash);
-screen.render();
-utils.syncStatus("Initial routing protocol check-in");
+async function main() {
+  while (true) {
+    showMenu();
+    const choice = await prompt("Select option [1-5]: ");
+    if (choice === "1") {
+      await claimFaucetsForAll();
+    } else if (choice === "2") {
+      await mintAllForAll();
+    } else if (choice === "3") {
+      await stakeAllForAll();
+    } else if (choice === "4") {
+      await runAutomatic24h();
+      break;
+    } else if (choice === "5") {
+      log(green("Exiting..."));
+      process.exit(0);
+    } else {
+      log(red("Invalid option. Try again."));
+    }
+  }
+  rl.close();
+}
 
-setTimeout(() => {
-  splash.hide();
-  menu.show();
-  outputBox.show();
-  walletBox.show();
-  clearOutput();
-  showWalletStatus();
-  menu.focus();
-  screen.render();
-}, 1800);
-
-screen.key(['escape', 'q', 'C-c'], () => process.exit(0));
+main();
